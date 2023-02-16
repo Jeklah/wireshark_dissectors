@@ -144,3 +144,17 @@ do
   F.Framing_Code = ProtoField.uint8("st_2110_40.Data.Framing_Code", "Framing Code", base.HEX, nil, 0xFF)
   F.Magazine_Hamming = ProtoField.uint16("st_2110_40.Data.Magazine_Hamming", "Magazine (Hamming 8/4)", base.DEC, nil,
           0xFC00)
+  F.Magazine = ProtoField.uint8("st_2110_40.Data.Magazine", "Magazine", base.DEC, nil)
+  F.PacketNumber_Hamming = ProtoField.uint16("st_2110_40.Data.PacketNumber_Hamming", "Packet Number (Hamming 8/4",
+          base.DEC, nil, 0x3FF)
+  F.PacketNumber = ProtoField.uint8("st_2110_40.Data.PacketNumber", "Packet Number", base.DEC, nil)
+  F.PageUnits_Hamming = ProtoField.uint8("st_2110_40.Data.PageUnits_Hamming", "Page Units (Hamming 8/4)", base.HEX, nil,
+          0xFF)
+  F.PageUnits = ProtoField.uint8("st_2110_40.Data.PageUnits", "Page Units", base.HEX, nil)
+
+  F.PageTens_Hamming = ProtoField.uint8("st_2110_40.Data.PageTens_Hamming", "Page Tens (Hamming 8/4)", base.HEX, nil,
+          0xFF)
+  F.PageTens = ProtoField.uint8("st_2110_40.Data.PageTens", "Page Tens", base.HEX, nil)
+
+  F.DataString = ProtoField.string("st_2110_40.Data.Data_String", "Data String")
+  F.TextData_Array = ProtoField.bytes("st_2110_40.Data.TextData", "Text Data", base.SPACE)
