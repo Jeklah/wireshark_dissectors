@@ -527,3 +527,84 @@ do
       ---
       local Data_Count = tvb(offset + 6, 2):bitfield(6, 8)
       local PacketLen_Bytes = (math.ceil((72 + (Data_Count * 10)) / 32 * 4))
+      local subtree = datatree:add(tvb(offset, PacketLen_Bytes), string.format("Packet %d", i))
+
+      subtree:add(F.C, tvb(offset, 1))
+      LN_proto = subtree:add(F.Line_Number, tvb(offset, 2))
+      Line_Number = tvb(offset, 2):bitfield(0, 11)
+      if LNC[Line_Number] then
+        LN_proto:append_text(": " .. LNC[Line_Number])
+      end
+      HO_proto = subtree:add(F.HO, tvb(offset + 1, 2))
+      Horiz_Offset = tvb(offset + 1, 2):bitfield(4, 12)
+      subtree:add(F.S, tvb(offset + 3, 1))
+      subtree:add(F.StreamNum, tvb(offset + 3, 1))
+      StreamNum = tvb(offset + 2, 1):bitfield(1, 7)
+      if HOC[Horiz_Offset] then
+        HO_proto:append_text(": " .. HOC[Horiz_Offset])
+      end
+      subtree:add(F.DID, tvb(offset + 4, 2))
+      DID = tvb(offset + 4, 2):bitfield(2, 8)
+      SDID_proto = subtree:add(F.SDID, tvb(offset + 5, 2))
+      SDID = tvb(offset + 5, 2):bitfield(4, 8)
+      subtree:append_text(string.format(": DID 0x%02x, SDID 0x%02x", DID, SDID))
+
+      if DID_SDID[DID] and not DID_SDID[DID][SDID] then
+        subtree:append_text(": " .. DID_SDID[DID])
+        SDID_proto:append_text(": " .. DID_SDID[DID])
+      end
+      if DID_SDID[DID] and DID_SDID[DID][SDID] then
+        subtree:append_text(": " .. DID_SDID[DID][SDID])
+        SDID_proto:append_text(": " .. DID_SDID[DID][SDID])
+      end
+      subtree:add(F.Data_Count, tvb(offset + 6, 2))
+
+      -- the calculation of the UDW length includes math.floor
+      -- to round the numer to the smaller or equal
+      local UDW_length = 1 + math.floor(((Data_Count * 10) - 2) / 8)
+
+      -- Highlight the raw UDW bytes in the data display. This includes bytes
+      -- which overlap with the Data_Count and checksum word.
+      if (((Data_Count * 10) - 2) % 8) then
+        subtree:add(F.UDW, tvb(offset + 7, UDW_length + 1))
+      else
+        subtree:add(F.UDW, tvb(offset + 7, UDW_length))
+      end
+
+
+      -- Extract the user data words from the payload.
+      -- User Data Words is an array of 10 bits words
+      -- For each 10 bits words, 2 MSB bits (b8 and b9)
+      -- are bits used to error detection.
+      -- These bits won't be extracted in the byte Array,
+      -- but we extract b8 to include it in the checksum.
+
+      local data_Table = ByteArray.new()
+      data_Table:set_size(Data_Count)
+
+      -- Initialise checksum with 9 LSBs of DID, SDID, Data_Count
+      local cs_calc = tvb(offset + 4, 2):bitfield(1, 9) + -- DID
+          tvb(offset + 5, 2):bitfield(3, 9) + -- SDID
+          tvb(offset + 6, 2):bitfield(5, 9) -- Data_Count
+      local dw_off = offset + 7
+      local dw_rem = 6
+
+      for i = 0, Data_Count - 1 do
+        local v
+        -- +1 here to ignore the MSB (b8)
+        v = tvb(dw_off, 2):bitfield(dw_rem + 1, 9)
+
+        -- Checksum includes sum of bits 8:0 of all UDWs
+        cs_calc = cs_calc + v
+        -- UDW table contains the 8 LSBs of each UDW
+        data_Table:set_index(i, (v % 256))
+
+        if (dw_rem == 6) then
+          -- Data word ends on byte boundary, no overlap with next UDW
+          dw_off = dw_off + 2
+          dw_rem = 0
+        else
+          dw_off = dw_off + 1
+          dw_rem = dw_rem + 2
+        end
+      end
