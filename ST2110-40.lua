@@ -628,3 +628,119 @@ do
         -- Invalid payload checksum
         cs_item:add_expert_info(PI_CHECKSUM, PI_WARN, "The calculated ANC checksum and ANC checksum word do not match.")
       end
+
+      -- Add the decoded UDW array to the dissector output
+      local ntvb = ByteArray.tvb(data_Table, "UDW Array")
+      local tree_data = subtree:add(F.UDW_array, ntvb())
+      tree_data:set_generated()
+
+
+
+      --
+      -- Protocol specific decodes below this point
+      ---------------------------------------------
+
+      --
+      -- Parsing time code DID=0x60 and SDID=0x60
+      -- Ancillary Time Code (S12M-2)
+      -- https://www.itu.int/dms_pubrec/itu-r/rec/bt/R-REC-BT.1366-0-199802-S!!PDF-E.pdf
+      -- The bits b4-b7 (4 MSB bits of the UDW) contains the timecode data
+      -- VITC is contained in the b3 bit of each word (where b0 is the LSB bit)
+      --
+
+      if (DID == 0x60 and SDID == 0x60 and Data_Count == 16) then
+        local time_Table = ByteArray.new()
+        local vitc_Table = ByteArray.new()
+        time_Table:set_size(Data_Count)
+        vitc_Table:set_size(Data_count)
+        for x = 0, Data_Count - 1 do
+          time = ntvb(x, 1):bitfield(0, 4)
+          vitc = ntvb(x, 1):bitfield(5, 1)
+          vitc_Table:set_index(x, vitc)
+          time_Table:set_index(x, time)
+        end
+
+        -- Timecode format
+        -- (UDW-15 & UDW-13) hours | (UDW-11 & UDW-9) minutes | (UDW-7 & UDW-5) seconds | (UDW-3 & UDW-1) frames
+        --
+        local ttvb = ByteArray.tvb(time_Table, "TimeCode")
+        local timeStr = string.format("%d%dH:%d%dm:%d%ds:%d%dframes",
+                ttvb(14, 1):bitfield(6, 2),
+                ttvb(12, 1):bitfield(4, 4),
+                ttvb(10, 1):bitfield(5, 3),
+                ttvb(8, 1):bitfield(4, 4),
+                ttvb(6, 1):bitfield(5, 3),
+                ttvb(4, 1):bitfield(4, 4),
+                ttvb(2, 1):bitfield(6, 2),
+                ttvb(0, 1):bitfield(4, 4)
+            )
+        tree:add(F.TimeCode, ttvb(), timeStr):set_generated()
+
+        -- Decode DBB1 (payload type) and DBB2 (VITC status) fields
+        local dbb1 = 0
+        local dbb2 = 0
+        for x = 0, (Data_Count / 2) - 1 do
+          -- Poor man's (value << 1> | LSB), Lua *DIDN'T* have bitwise operators...it does now!! TODO: implement bitwise operator.
+          -- UDW1 b3 contains LSB, IDW8 b3 contains MSB (similarly for UDW 9-16).
+          -- NOTE: Wireshark Bitfields have MSB=b0, so IDW b3 = Wireshark b4
+          dbb1 = (dbb1 * 2) + ntvb(7 - x, 1):bitfield(4, 1)
+          dbb2 = (dbb2 * 2) + ntvb(15 - x, 1):bitfield(4, 1)
+        end
+
+        -- We display DBB1 as the payload type
+        tree_data.add(F.TimeCodePT, dbb1):set_generated()
+
+        -- Display the DBB2 data next, even if it isn't VITC (probably zero)
+        local tree_dbb2 = tree_data:add(F.TimeCodeVITC, dbb2):set_generated()
+
+        -- Decode DBB2 (VITC) details when DBB1 == VITC
+        if (dbb1 == 0x01 or dbb1 == 0x02) then
+          tree_dbb2:add(F.TimeCodeVitcLineSel, dbb2):set_generated()
+          tree_dbb2:add(F.TimeCodeVitcLineSel, dbb2):set_generated()
+          tree_dbb2:add(F.TimeCodeVitcValidity, dbb2):set_generated()
+          tree_dbb2:add(F.TimeCodeVitcProcess, dbb2):set_generated()
+        end
+        -- End of timecode format parsing.
+
+
+        --
+        -- Parsing EIA 708B Data mapping into VANC space (S334-1)
+        -- DID=0x61 and SDID=0x01
+        -- Documentation followed from https://en.wikipedia.org/wiki/CEA-708#Packets_in_CEA-708
+        --
+      elseif (DID == 0X61 and SDID == 0X01) then
+        --
+        -- CDP Header Syntax
+        -- Magic[2bytes] == 0x9669 | CDP Length [1bytes] | Frame Rate[1bytes]
+        -- Sections available [1byte] | Counter[2bytes] | Sections ...
+        --
+        tree_data:add(F.Magic, ntvb(0, 2))
+        CDP_size = ntvb(2, 1):bitfield(0, 8)
+        tree_data:add(F.DataWord_Count, CDP_size)
+        tree_data:add(F.Frame_Rate, ntvb(3, 1):bitfield(0, 4))
+        tree_data:add(F.Section_Available, ntvb(4, 1))
+        tree_data:add(F.CDP_Seq_Counter, ntvb(5, 2))
+
+        local s = 7 -- for the love of god rename this
+        while s < CDP_size do
+          local CDPsection = ntvb(s, 1):bitfield(0, 8)
+          section = tree_data:add(F.CDP_Section_Type, CDPsection)
+          if CDP_Section_Type[CDPsection] then
+            section:append_text(":" .. CDP_Section_Type[CDPsection])
+          end
+
+          -- Parsing CDP CC Service Information
+          if CDPsection == 0x73 then
+            tree_data:add(F.CCDataCount, ntvb(s + 1, 1):bitfield(4, 4))
+            s = s + 16
+            -- Parsing CDP Footer Section
+          elseif CDPsection == 0x74 then
+            -- FooterSequence Counter (16bits)
+            -- Packet Checksum (8bits)
+            s = s + 4
+          elseif CDPsection == 0x71 then
+            timeStr = string.format("%d%dH:%d%dm:%d%ds:%d%dframes",
+                    ntvb(s + 1, 1):bitfield(2, 2),
+                    ntvb(s + 1, 1):bitfield(4, 4),
+
+                )
