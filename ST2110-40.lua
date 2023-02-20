@@ -608,3 +608,23 @@ do
           dw_rem = dw_rem + 2
         end
       end
+
+      -- Extract the checksum value (immediately after the last UDW)
+      local cs_received = tvb(dw_off, 2):bitfield(dw_rem, 10)
+      local cs_item = subtree:add(F.Checksum, tvb(dw_rem, 2), cs_received,
+              string.format("Checksum Word: 0x%03x", cs_received))
+
+
+      -- Finish the checksum calculation and attack the result to the received checksum.
+      -- Checksum value is sum[8:0], b9 =~ b8
+      cs_calc = (cs_calc % 0x200) -- wrap at 9 LSBs
+      if (math.floor(cs_calc / 0x100) == 0) then
+        cs_calc = cs_calc + 0x200
+      end
+      cs_item:add(F.Checksum_Calc, cs_calc, string.format("Calculated Checksum: 0x%03x", cs_calc)):set_generated()
+
+      -- Add Warning if checksum validation failed
+      if cs_received ~= cs_calc then
+        -- Invalid payload checksum
+        cs_item:add_expert_info(PI_CHECKSUM, PI_WARN, "The calculated ANC checksum and ANC checksum word do not match.")
+      end
