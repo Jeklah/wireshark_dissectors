@@ -1152,7 +1152,7 @@ do
 	local dyn_payload_type_table = DissectorTable.get("rtp_dyn_payload_type")
 	dyn_payload_type_table:add("st_2110_40", st_2110_40)
 
-	-- register dissector to RTP payload type
+	-- Register dissector to RTP payload type
 	local payload_type_table = DissectorTable.get("rtp.pt")
 	local old_dissector = nil
 	local old_dyn_pt = 0
