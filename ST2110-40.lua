@@ -742,5 +742,109 @@ do
             timeStr = string.format("%d%dH:%d%dm:%d%ds:%d%dframes",
                     ntvb(s + 1, 1):bitfield(2, 2),
                     ntvb(s + 1, 1):bitfield(4, 4),
-
+                    ntvb(s + 2, 1):bitfield(1, 3),
+                    ntvb(s + 2, 1):bitfield(4, 4),
+                    ntvb(s + 3, 1):bitfield(1, 3),
+                    ntvb(s + 3, 1):bitfield(4, 4),
+                    ntvb(s + 4, 1):bitfield(2, 2),
+                    ntvb(s + 4, 1):bitfield(4, 4)
                 )
+            tree_data:add(F.TimeCode, timeStr)
+            s = s + 4
+            -- Parsing CC Data Section
+          elseif CDPsection == 0x72 then
+            local dataSection_Count = ntvb(s + 1, 1):bitfield(3, 5)
+            tree_data:add(F.CCDataCount, dataSection_Count)
+            local n = 0
+            local CDP_CC_Type = 0
+            local CC_type_str
+            local value = 0
+            local buffer_size = 0
+            local cdp_offset = s + 2
+            s = s + 2 -- section type + section count
+            dSize = dataSection_Count * 3
+            s = s + dSize
+
+            --
+            -- Parsing DTVCC packet (CC_data_pkt) inside user_data_type_structure
+            -- CC_data_pkt (24bits): Type[1 byte] - Pkt_Data[2 bytes]
+            --
+            -- Initialise the array at each packet
+            -- With the dataSection Count
+            -- after the loop the length will be refitted
+            local CC_concat = ByteArray.new()
+            CC_concat:set_size(dataSection_Count * 2)
+
+            for c = 1, dataSection_Count do
+              -- parsing CC_Data type
+              -- TODO: maybe take the 2 LSB bits
+              CDP_CC_Type = ntvb(cdp_offset + n, 1):bitfield(0, 8)
+              CC_type_str = tree_data:add(F.CCType, CDP_CC_Type)
+              if CC_TYPE[CDP_CC_Type] then
+                CC_type_str:append_text(": " .. CC_TYPE[CDP_CC_Type])
+              end
+              value = ntvb(cdp_offset + n + 1, 2)
+              tree_data:add(F.CCValue, value)
+
+              -- The first CDP_CC_Type is the service designated
+              if c == 1 then
+                serviceNb = CDP_CC_Type
+              end
+
+              -- Fill the Packet_Data_Structure
+              -- Value: cc_data_1 [1byte] - cc_data_2 [1byte]
+              -- Service 1 is designated as the Primary Caption Service
+              -- Service 2 is the Secondary Language Service
+              -- We collect only data from the first service (serviceNb=0xfc)
+              if CDP_CC_Type == 0xFE and serviceNb == 0xFC then
+                CC_concat:set_index(buffer_size * 2, ntvb(cdp_offset + n, 1):bitfield(0, 8))
+                CC_concat:set_index(buffer_size * 2 + 1, ntvb(cdp_offset + n + 2, 1):bitfield(0, 8))
+                buffer_size = buffer_size + 1
+              end
+              n = n + 3
+            end
+
+            if (buffer_size > 1) then
+              if CC_concat:get_index(0) == 0x0D
+                  and CC_concat:get_index(1) == 0x90
+                  and CC_concat:get_index(4) == 0x91 then
+                -- do nothing
+                -- 0x0D is a code control
+                -- 0x90 is a "Set Pen Attribute" code
+                -- 0x91 is "Set Pen Color" code
+                CC_concat:set_size(0)
+
+                -- If the frame contains these caption commands, they are "DefineWindow0-7" command
+                -- This command creates one of the eight windows used by the caption decoder.
+                -- The command is followed by 6 bytes defining relative positioning, row and anchor count
+                -- In this plugin, this command is replace by "\n" ascii code.
+              elseif CC_concat:get_index(0) >= 0x98 and CC_concat:get_index(0) <= 0x9f then
+                CC_concat:set_size(1)
+                CC_concat:set_index(0, 0x0A)
+              else
+                -- Remove the last two bytes
+                CC_concat:set_size((buffer_size - 1) * 2)
+              end
+            end
+
+            -- Print both Pkt_Data_Structure
+            -- TODO: find a way to print UTF8-ascii
+            if buffer_size ~= 0 then
+              ---@diagnostic disable-next-line: redundant-parameter
+              str = tostring(CC_concat, ENC_UTF8)
+              tree_data:add(F.CCData, str)
+            end
+          else
+            s = s + 1
+          end -- end if CDPSection == 0x72
+        end -- end for CDP Section
+
+        -- Parsing Subtitling Distribution Packets in VANC space (ST RDD-8)
+        -- (Free TV Australia Operational Practice OP-47)
+        -- DID=0x43 and SDID=0x02
+        --
+      elseif (DID == 0x43 and SDID == 0x02) then
+        tree_data:add(F.SDP_Identifier, ntvb(0, 2))
+        tree_data:add(F.SDP_Length, ntvb(2, 1))
+        tree_data:add(F.SDP_FormatCode, ntvb(3, 1))
+        local formatCode = ntvb(3, 1):uint()
