@@ -705,7 +705,7 @@ do
 			subtree:add(F.MagazineSerial, inBuf(9, 1))
 			subtree:add(F.CharacterSet, inBuf(9, 1))
 
-		-- packet numbers between 1 and 25 contain data
+			-- packet numbers between 1 and 25 contain data
 		elseif packet_number >= 1 and packet_number <= 25 then
 			data_start_offset = 2
 			number_of_data_bytes = 40
@@ -930,7 +930,8 @@ do
 				local dbb1 = 0
 				local dbb2 = 0
 				for x = 0, (Data_Count / 2) - 1 do
-					-- Poor man's (value << 1> | LSB), Lua *DIDN'T* have bitwise operators...it does now!! TODO: implement bitwise operator.
+					-- Poor man's (value << 1> | LSB), Lua *DIDN'T* have bitwise operators...it does now!!
+					-- TODO: implement bitwise operator.
 					-- UDW1 b3 contains LSB, IDW8 b3 contains MSB (similarly for UDW 9-16).
 					-- NOTE: Wireshark Bitfields have MSB=b0, so IDW b3 = Wireshark b4
 					dbb1 = (dbb1 * 2) + ntvb(7 - x, 1):bitfield(4, 1)
@@ -950,13 +951,13 @@ do
 					tree_dbb2:add(F.TimeCodeVitcValidity, dbb2):set_generated()
 					tree_dbb2:add(F.TimeCodeVitcProcess, dbb2):set_generated()
 				end
-			-- End of timecode format parsing.
+				-- End of timecode format parsing.
 
-			--
-			-- Parsing EIA 708B Data mapping into VANC space (S334-1)
-			-- DID=0x61 and SDID=0x01
-			-- Documentation followed from https://en.wikipedia.org/wiki/CEA-708#Packets_in_CEA-708
-			--
+				--
+				-- Parsing EIA 708B Data mapping into VANC space (S334-1)
+				-- DID=0x61 and SDID=0x01
+				-- Documentation followed from https://en.wikipedia.org/wiki/CEA-708#Packets_in_CEA-708
+				--
 			elseif DID == 0X61 and SDID == 0X01 then
 				--
 				-- CDP Header Syntax
@@ -982,7 +983,7 @@ do
 					if CDPsection == 0x73 then
 						tree_data:add(F.CCDataCount, ntvb(s + 1, 1):bitfield(4, 4))
 						s = s + 16
-					-- Parsing CDP Footer Section
+						-- Parsing CDP Footer Section
 					elseif CDPsection == 0x74 then
 						-- FooterSequence Counter (16bits)
 						-- Packet Checksum (8bits)
@@ -1001,7 +1002,7 @@ do
 						)
 						tree_data:add(F.TimeCode, timeStr)
 						s = s + 4
-					-- Parsing CC Data Section
+						-- Parsing CC Data Section
 					elseif CDPsection == 0x72 then
 						local dataSection_Count = ntvb(s + 1, 1):bitfield(3, 5)
 						tree_data:add(F.CCDataCount, dataSection_Count)
@@ -1066,10 +1067,10 @@ do
 								-- 0x91 is "Set Pen Color" code
 								CC_concat:set_size(0)
 
-							-- If the frame contains these caption commands, they are "DefineWindow0-7" command
-							-- This command creates one of the eight windows used by the caption decoder.
-							-- The command is followed by 6 bytes defining relative positioning, row and anchor count
-							-- In this plugin, this command is replace by "\n" ascii code.
+								-- If the frame contains these caption commands, they are "DefineWindow0-7" command
+								-- This command creates one of the eight windows used by the caption decoder.
+								-- The command is followed by 6 bytes defining relative positioning, row and anchor count
+								-- In this plugin, this command is replace by "\n" ascii code.
 							elseif CC_concat:get_index(0) >= 0x98 and CC_concat:get_index(0) <= 0x9f then
 								CC_concat:set_size(1)
 								CC_concat:set_index(0, 0x0A)
@@ -1091,10 +1092,10 @@ do
 					end -- end if CDPSection == 0x72
 				end -- end for CDP Section
 
-			-- Parsing Subtitling Distribution Packets in VANC space (ST RDD-8)
-			-- (Free TV Australia Operational Practice OP-47)
-			-- DID=0x43 and SDID=0x02
-			--
+				-- Parsing Subtitling Distribution Packets in VANC space (ST RDD-8)
+				-- (Free TV Australia Operational Practice OP-47)
+				-- DID=0x43 and SDID=0x02
+				--
 			elseif DID == 0x43 and SDID == 0x02 then
 				tree_data:add(F.SDP_Identifier, ntvb(0, 2))
 				tree_data:add(F.SDP_Length, ntvb(2, 1))
