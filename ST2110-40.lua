@@ -848,3 +848,45 @@ do
         tree_data:add(F.SDP_Length, ntvb(2, 1))
         tree_data:add(F.SDP_FormatCode, ntvb(3, 1))
         local formatCode = ntvb(3, 1):uint()
+
+
+        if (formatCode == 0x02) then  -- '0x02' ==> WST teletext subtitles
+          tree_data:add(F.SDP_AdaptionHeader, ntvb(4, 5)):set_generated()
+
+          -- Offsets to Packet Descriptor Structures A and B
+          local offsetA = 4
+          local offsetB = 9
+          for i=1, 5 do -- OP-47 can carry up to five WST Packets per VANC packet.
+            local pktDescA = ntvb(offsetA,1):uint()
+            if (pktDescA == 0) then
+              break     -- Per OP-47 5.4.2, no more WSTs to parse
+            end
+
+            local isField1 = ntvb(offsetA,1):bitfield(0,1) -- b7    => VBI field flag
+            local lineNum = ntvb(offsetA,1):bitfield(3,5)  -- b4..0 => VBI line number
+            local tree_wst = tree_data:add(F.SDP_PktDescB, ntvb(offsetB, 45)):set_generated()
+            tree_wst:add(F.Clock_RunIn, ntvb(offsetB,2)):set_generated()
+            tree_wst:add(F.Framing_Code, ntvb(offsetB+2,1)):set_generated()
+
+            -- NB: The bit ordering of WST payload bytes carried in OP-47 is
+            -- the reverse of EN 300 706, which uses VBI transmission order.
+            -- Starting with the Magazine and Row Address Group, reverse the
+            -- bits in the remaining 42 WST payload bytes, and then process
+            -- per EN 300 706.
+            -- (Note that ByteArray uses 0-based indexing, whereas Lua arrays
+            -- are 1-based, hence use of 'byte+1'.)
+            local bitFlippedData = ByteArray.new()
+            bitFlippedData:set_size(42)
+            for i=0,41 do
+              local byte = ntvb(offsetB+3+i, 1):uint()
+              local reversed = ReverseByte[bit32.band(byte+1, 0xff)]
+              bitFlippedData:set_index(i, reversed)
+            end
+
+            ProcessWstPacket(bitFlippedData:tvb(wst), tree_wst)
+
+            offsetA = offsetA + 1  -- increment to next A descriptor
+            offsetB = offsetB + 45 -- increment to next corresponding payload
+          end -- for i=1, 5
+        end   -- if (formatCode == 0x02)
+      end     -- end if DID
