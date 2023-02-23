@@ -742,7 +742,7 @@ do
 
 	function st_2110_40.dissector(tvb, pinfo, tree)
 		local length = tvb(2, 2):uint() + 8 -- ST2110-40 header not included in length
-		local datatree = tree:add(st_2110_20, tvb(0, length), "ST 2110_40 Data")
+		local datatree = tree:add(st_2110_40, tvb(0, length), "ST 2110_40 Data")
 		--
 		-- Read ANC RTP payload header
 		--
